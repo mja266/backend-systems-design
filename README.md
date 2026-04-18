@@ -1,4 +1,9 @@
+<<<<<<< HEAD
 # Backend API Onboarding Prep
+=======
+# Backend-Systems-Design
+
+>>>>>>> b786031cebfa2a1e85fe3b84ec6d19500f4f0441
 
 Built a backend REST API from scratch using Flask and SQLite, implementing full CRUD operations, relational data modeling (users ↔ tasks), input validation, error handling, SQL joins, and debugging workflows over a structured multi-week onboarding plan.
 
@@ -76,4 +81,7 @@ The API supports:
 
 ### Users
 
+<<<<<<< HEAD
+#### Get all users
+=======
 #### Get all users
