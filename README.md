@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# Backend API Onboarding Prep
-=======
 # Backend-Systems-Design
 
 >>>>>>> b786031cebfa2a1e85fe3b84ec6d19500f4f0441
