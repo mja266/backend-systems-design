@@ -1,94 +1,123 @@
-# Import Flask utilities for creating routes and handling requests/responses
+# Import Blueprint to organize routes,
+# request to read incoming request data,
+# and jsonify to return JSON responses
 from flask import Blueprint, request, jsonify
 
-# Import SQLite for database interaction
+# Import sqlite3 so we can use SQLite as our database
 import sqlite3
 
-# Create a Blueprint (modular route group) for users
+# Create a blueprint named "users"
+# This allows us to keep user routes separate from the main app
 users_bp = Blueprint('users', __name__)
 
 
-# 🔹 Helper function to connect to database
+# Helper function to open a database connection
 def get_db_connection():
-    # Connect to SQLite database file
+    # Connect to the SQLite database file
     conn = sqlite3.connect('database.db')
-    
-    # Allows accessing columns by name instead of index
+
+    # Make rows behave like dictionaries so we can use column names
     conn.row_factory = sqlite3.Row
-    
+
+    # Return the connection object
     return conn
 
 
-# 🔹 Initialize database (runs once when app starts)
+# Function to create tables if they do not exist yet
 def init_db():
-    conn = get_db_connection()        # Connect to DB
-    cursor = conn.cursor()            # Create cursor for executing SQL
+    # Open a database connection
+    conn = get_db_connection()
 
-    # Create users table if it doesn't exist
+    # Create a cursor so we can execute SQL commands
+    cursor = conn.cursor()
+
+    # Create the users table if it does not already exist
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,  -- unique ID
-        name TEXT NOT NULL,                   -- user name
-        email TEXT NOT NULL                  -- user email
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL
     )
     ''')
 
-    # Create tasks table (linked to users)
+    # Create the tasks table if it does not already exist
+    # user_id links each task to a user
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
-        user_id INTEGER,                      -- foreign key to users
+        user_id INTEGER,
         FOREIGN KEY (user_id) REFERENCES users (id)
     )
     ''')
 
-    conn.commit()   # Save changes
-    conn.close()    # Close connection
+    # Save the changes to the database
+    conn.commit()
+
+    # Close the database connection
+    conn.close()
 
 
-# 🔹 GET /users → return all users
+# GET /users
+# Return all users from the database
 @users_bp.route('/users', methods=['GET'])
 def get_users():
-    conn = get_db_connection()                         # connect to DB
-    users = conn.execute('SELECT * FROM users').fetchall()  # fetch all users
-    conn.close()                                       # close DB
+    # Open database connection
+    conn = get_db_connection()
 
-    # Convert rows → dictionary → JSON
+    # Fetch all rows from the users table
+    users = conn.execute('SELECT * FROM users').fetchall()
+
+    # Close connection
+    conn.close()
+
+    # Convert each row into a normal dictionary and return JSON
     return jsonify([dict(user) for user in users])
 
 
-# 🔹 POST /users → create a new user
+# POST /users
+# Create a new user in the database
 @users_bp.route('/users', methods=['POST'])
 def create_user():
-    data = request.get_json()   # get JSON from request body
+    # Read JSON body from the incoming request
+    data = request.get_json()
 
-    # Validate JSON exists
+    # If request body is missing or invalid, return an error
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
 
-    # Extract fields
+    # Extract the name field from the request body
     name = data.get('name')
+
+    # Extract the email field from the request body
     email = data.get('email')
 
     # Validate required fields
     if not name or not email:
         return jsonify({"error": "Name and email required"}), 400
 
-    conn = get_db_connection()     # connect DB
-    cursor = conn.cursor()         # create cursor
+    # Open database connection
+    conn = get_db_connection()
 
-    # Insert into users table
+    # Create a cursor for SQL execution
+    cursor = conn.cursor()
+
+    # Insert the new user into the users table
     cursor.execute(
         'INSERT INTO users (name, email) VALUES (?, ?)',
         (name, email)
     )
 
-    conn.commit()                  # save changes
-    new_id = cursor.lastrowid      # get inserted ID
-    conn.close()                   # close DB
+    # Save changes
+    conn.commit()
 
-    # Return created user
+    # Get the id of the newly inserted row
+    new_id = cursor.lastrowid
+
+    # Close the connection
+    conn.close()
+
+    # Return the newly created user as JSON with 201 Created
     return jsonify({
         "id": new_id,
         "name": name,
