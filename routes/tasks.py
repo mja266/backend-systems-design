@@ -1,162 +1,138 @@
-# Import Blueprint to organize routes,
-# request to read incoming data,
-# and jsonify to return JSON responses
+# Import Blueprint to organize routes into modular components
+# request is used to access incoming HTTP request data (JSON body)
+# jsonify converts Python data structures into JSON responses
 from flask import Blueprint, request, jsonify
 
-# Import sqlite3 for SQLite database access
-import sqlite3
+# Import database helper function to establish a connection to SQLite
+from utils.db import get_db_connection
 
-# Create a blueprint named "tasks"
+
+# Create a Blueprint for task-related routes
+# 'tasks' is the blueprint name
+# __name__ allows Flask to correctly locate resources relative to this file
 tasks_bp = Blueprint('tasks', __name__)
 
 
-# Helper function to open a database connection
-def get_db_connection():
-    # Connect to the SQLite database file
-    conn = sqlite3.connect('database.db')
-
-    # Make database rows behave like dictionaries
-    conn.row_factory = sqlite3.Row
-
-    # Return the connection object
-    return conn
-
-
-# GET /tasks
-# Return all tasks, including the name of the associated user if available
+# =========================================================
+# GET /tasks → Fetch all tasks (with user name via JOIN)
+# =========================================================
 @tasks_bp.route('/tasks', methods=['GET'])
 def get_tasks():
-    # Open database connection
+    # Establish a connection to the database
     conn = get_db_connection()
 
-    # Run a LEFT JOIN so tasks are returned even if user_id is null
-    # We also rename users.name to user_name in the result
+    # Execute SQL query:
+    # - Select all task fields (t.*)
+    # - Join with users table to also get user name
+    # - LEFT JOIN ensures tasks still appear even if user is missing
     tasks = conn.execute('''
-        SELECT tasks.id, tasks.title, tasks.user_id, users.name AS user_name
-        FROM tasks
-        LEFT JOIN users ON tasks.user_id = users.id
+        SELECT t.*, u.name AS user_name
+        FROM tasks t
+        LEFT JOIN users u ON t.user_id = u.id
     ''').fetchall()
 
-    # Close the connection
+    # Close the database connection to prevent memory leaks
     conn.close()
 
-    # Convert rows to dictionaries and return them as JSON
+    # Convert each row (sqlite3.Row) into a dictionary
+    # Return as JSON array
     return jsonify([dict(task) for task in tasks])
 
 
-# POST /tasks
-# Create a new task
-@tasks_bp.route('/tasks', methods=['POST'])
-def create_task():
-    # Read JSON body from request
-    data = request.get_json()
-
-    # If the JSON body is missing or invalid, return an error
-    if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
-
-    # Extract title from request body
-    title = data.get('title')
-
-    # Extract user_id from request body
-    user_id = data.get('user_id')
-
-    # Make sure title was provided
-    if not title:
-        return jsonify({"error": "Title required"}), 400
-
-    # Open database connection
+# =========================================================
+# GET /tasks/<id> → Fetch a single task by ID
+# =========================================================
+@tasks_bp.route('/tasks/<int:id>', methods=['GET'])
+def get_task(id):
+    # Open DB connection
     conn = get_db_connection()
 
-    # Create cursor
+    # Query for a single task using its ID
+    # Include user name using JOIN
+    task = conn.execute('''
+        SELECT t.*, u.name AS user_name
+        FROM tasks t
+        LEFT JOIN users u ON t.user_id = u.id
+        WHERE t.id = ?
+    ''', (id,)).fetchone()
+
+    # Close DB connection
+    conn.close()
+
+    # If task not found, return 404 error
+    if task is None:
+        return jsonify({'error': 'Task not found'}), 404
+
+    # Return task as JSON
+    return jsonify(dict(task))
+
+
+# =========================================================
+# POST /tasks → Create a new task
+# =========================================================
+@tasks_bp.route('/tasks', methods=['POST'])
+def create_task():
+    # Extract JSON data from incoming request body
+    data = request.get_json()
+
+    # Safely extract values (returns None if missing)
+    title = data.get('title')
+    user_id = data.get('user_id')
+
+    # Basic validation: both fields must exist
+    if not title or not user_id:
+        return jsonify({'error': 'Title and user_id required'}), 400
+
+    # Open DB connection
+    conn = get_db_connection()
+
+    # Create cursor to execute SQL commands
     cursor = conn.cursor()
 
-    # Optional validation:
-    # if user_id was provided, verify that the user actually exists
-    if user_id is not None:
-        existing_user = conn.execute(
-            'SELECT * FROM users WHERE id = ?',
-            (user_id,)
-        ).fetchone()
-
-        if existing_user is None:
-            conn.close()
-            return jsonify({"error": "User not found"}), 404
-
-    # Insert the task into the tasks table
+    # Insert new task into database
     cursor.execute(
         'INSERT INTO tasks (title, user_id) VALUES (?, ?)',
         (title, user_id)
     )
 
-    # Save changes
+    # Commit transaction so changes are saved
     conn.commit()
 
-    # Get newly created task id
+    # Get ID of newly inserted row
     new_id = cursor.lastrowid
 
     # Close connection
     conn.close()
 
-    # Return the created task
+    # Return created task info with HTTP 201 (Created)
     return jsonify({
-        "id": new_id,
-        "title": title,
-        "user_id": user_id
+        'id': new_id,
+        'title': title,
+        'user_id': user_id
     }), 201
 
 
-# PUT /tasks/<id>
-# Update an existing task
+# =========================================================
+# PUT /tasks/<id> → Update an existing task
+# =========================================================
 @tasks_bp.route('/tasks/<int:id>', methods=['PUT'])
 def update_task(id):
-    # Read JSON body from request
+    # Get JSON data from request
     data = request.get_json()
 
-    # If request body is invalid, return an error
-    if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
-
-    # Extract title from request body
+    # Extract updated values
     title = data.get('title')
-
-    # Extract user_id from request body
     user_id = data.get('user_id')
 
-    # Require a title for update in this version
-    if not title:
-        return jsonify({"error": "Title required"}), 400
+    # Validate input
+    if not title or not user_id:
+        return jsonify({'error': 'Title and user_id required'}), 400
 
-    # Open database connection
+    # Open DB connection
     conn = get_db_connection()
 
-    # First, confirm the task exists
-    existing_task = conn.execute(
-        'SELECT * FROM tasks WHERE id = ?',
-        (id,)
-    ).fetchone()
-
-    # If task does not exist, return 404
-    if existing_task is None:
-        conn.close()
-        return jsonify({"error": "Task not found"}), 404
-
-    # If user_id was provided, confirm the referenced user exists
-    if user_id is not None:
-        existing_user = conn.execute(
-            'SELECT * FROM users WHERE id = ?',
-            (user_id,)
-        ).fetchone()
-
-        if existing_user is None:
-            conn.close()
-            return jsonify({"error": "User not found"}), 404
-
-    # Create cursor
-    cursor = conn.cursor()
-
-    # Update the task's title and user_id
-    cursor.execute(
+    # Execute update query
+    result = conn.execute(
         'UPDATE tasks SET title = ?, user_id = ? WHERE id = ?',
         (title, user_id, id)
     )
@@ -167,33 +143,24 @@ def update_task(id):
     # Close connection
     conn.close()
 
+    # If no rows were updated → task doesn't exist
+    if result.rowcount == 0:
+        return jsonify({'error': 'Task not found'}), 404
+
     # Return success message
-    return jsonify({"message": "Task updated"}), 200
+    return jsonify({'message': 'Task updated'})
 
 
-# DELETE /tasks/<id>
-# Delete an existing task
+# =========================================================
+# DELETE /tasks/<id> → Delete a task
+# =========================================================
 @tasks_bp.route('/tasks/<int:id>', methods=['DELETE'])
 def delete_task(id):
-    # Open database connection
+    # Open DB connection
     conn = get_db_connection()
 
-    # Check whether the task exists before deleting
-    existing_task = conn.execute(
-        'SELECT * FROM tasks WHERE id = ?',
-        (id,)
-    ).fetchone()
-
-    # If task does not exist, return 404
-    if existing_task is None:
-        conn.close()
-        return jsonify({"error": "Task not found"}), 404
-
-    # Create cursor
-    cursor = conn.cursor()
-
-    # Delete the task with the given id
-    cursor.execute(
+    # Execute delete query
+    result = conn.execute(
         'DELETE FROM tasks WHERE id = ?',
         (id,)
     )
@@ -204,5 +171,9 @@ def delete_task(id):
     # Close connection
     conn.close()
 
+    # If no rows were deleted → task doesn't exist
+    if result.rowcount == 0:
+        return jsonify({'error': 'Task not found'}), 404
+
     # Return success message
-    return jsonify({"message": "Task deleted"}), 200
+    return jsonify({'message': 'Task deleted'})

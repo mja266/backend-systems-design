@@ -1,30 +1,20 @@
-# Import Flask so we can create the main application
-from flask import Flask
+from flask import Flask  # Import Flask framework
 
-# Import the users blueprint and the database initializer from routes/users.py
-from routes.users import users_bp, init_db
-
-# Import the tasks blueprint from routes/tasks.py
+# Import the users Blueprint
+from routes.users import users_bp
 from routes.tasks import tasks_bp
-
-# Create the Flask app object
+# Create Flask app instance
 app = Flask(__name__)
 
-# Run database setup when the app starts
-# This creates the tables if they do not already exist
-init_db()
-
-# Register the users blueprint so /users routes become active
+# Register the users routes into the main app
 app.register_blueprint(users_bp)
-
-# Register the tasks blueprint so /tasks routes become active
 app.register_blueprint(tasks_bp)
-
-# Simple root route to confirm the backend is running
+# Root route (simple test endpoint)
 @app.route('/')
 def home():
     return "Backend API running"
 
-# Run the Flask development server when this file is executed directly
+# Run app locally
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True)  # debug=True enables auto-reload + error logs
+    
