@@ -83,8 +83,10 @@ def create_task():
     # Extract JSON data from incoming request body
     data = request.get_json()
 
-    # Safely extract values (returns None if missing)
-    title = data.get('title')
+    # ❌ INTENTIONALLY REMOVE safety handling
+    # (Do NOT check if data is None)
+
+    title = data.get('title')      # <-- this will crash if data is None
     user_id = data.get('user_id')
 
     # Basic validation: both fields must exist
@@ -152,8 +154,11 @@ def update_task(id):
     conn.close()
 
     # If no rows were updated → task doesn't exist
-    if result.rowcount == 0:
-        return jsonify({'error': 'Task not found'}), 404
+    #if result.rowcount == 0:
+        #return jsonify({'error': 'Task not found'}), 404
+    # ❌ REMOVE this check completely
+
+    return jsonify({'message': 'Task updated'})
 
     # Return success message
     return jsonify({'message': 'Task updated'})
