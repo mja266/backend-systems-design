@@ -59,6 +59,14 @@ def get_task(id):
     # Close DB connection
     conn.close()
 
+
+    # Logs
+    print("[INFO] GET /tasks called")  # Confirm route execution
+
+    print("[INFO] Running tasks query")  # Before SQL
+
+    print(f"[INFO] Retrieved {len(tasks)} tasks")  # After SQL
+    
     # If task not found, return 404 error
     if task is None:
         return jsonify({'error': 'Task not found'}), 404
