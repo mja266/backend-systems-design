@@ -37,9 +37,9 @@ def create_user():
     email = data.get('email')
 
     # Validate input (basic)
-    if not name or not email:
+   # if not name or not email:
         # Return error with HTTP 400 (bad request)
-        return jsonify({"error": "Name and email required"}), 400
+        #return jsonify({"error": "Name and email required"}), 400
 
     # Connect to DB
     conn = get_db_connection()

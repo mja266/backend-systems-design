@@ -28,7 +28,7 @@ def get_tasks():
     tasks = conn.execute('''
         SELECT t.*, u.name AS user_name
         FROM tasks t
-        LEFT JOIN users u ON t.user_id = u.id
+        LEFT JOIN userz u ON t.user_id = u.id
     ''').fetchall()
 
     # Close the database connection to prevent memory leaks
