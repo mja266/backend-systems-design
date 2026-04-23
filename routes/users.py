@@ -1,72 +1,101 @@
-from flask import Blueprint, request, jsonify  # Import Flask tools
-from utils.db import get_db_connection  # Import DB helper function
+from flask import Blueprint, request, jsonify  
+# Blueprint → allows modular route grouping (clean architecture)
+# request → used to access incoming HTTP request data (JSON body)
+# jsonify → converts Python objects (dict/list) into JSON responses
 
-# Create a Blueprint (modular route group)
-# 'users' = internal name
-# __name__ helps Flask locate this file
+from utils.db import get_db_connection  
+# Helper function that returns a connection to SQLite database
+
+
+# Create a Blueprint for all user-related routes
 users_bp = Blueprint('users', __name__)
 
-# =========================
-# GET /users/<id>
-# =========================
+
+# =========================================================
+# GET /users → Fetch ALL users
+# =========================================================
+@users_bp.route('/users', methods=['GET'])
+def get_users():
+    # Open a database connection
+    conn = get_db_connection()
+
+    # Execute SQL query to fetch all users
+    users = conn.execute('SELECT * FROM users').fetchall()
+
+    # Close the database connection to free resources
+    conn.close()
+
+    # Convert each row into a dictionary and return as JSON list
+    return jsonify([dict(user) for user in users])
+
+
+# =========================================================
+# GET /users/<id> → Fetch a SINGLE user by ID
+# =========================================================
 @users_bp.route('/users/<int:id>', methods=['GET'])
 def get_user(id):
     # Open database connection
     conn = get_db_connection()
 
-    # Fetch one user by ID
+    # Query database for a user with the given ID
     user = conn.execute(
         'SELECT * FROM users WHERE id = ?',
-        (id,)
+        (id,)  # Parameterized query prevents SQL injection
     ).fetchone()
 
     # Close connection
     conn.close()
 
-    # If no user exists with that ID, return 404
+    # If no user found → return 404 error
     if user is None:
         return jsonify({'error': 'User not found'}), 404
 
-    # Return the user as JSON
+    # Convert row to dictionary and return JSON response
     return jsonify(dict(user))
 
-# =========================
-# POST /users
-# =========================
+
+# =========================================================
+# POST /users → Create a new user
+# =========================================================
 @users_bp.route('/users', methods=['POST'])
 def create_user():
-    # Extract JSON data from incoming request
+    # Parse JSON body from request
     data = request.get_json()
 
-    # Get values safely from JSON
+    # Check if request body is missing or invalid JSON
+    if not data:
+        return jsonify({'error': 'Invalid JSON'}), 400
+
+    # Extract fields from JSON
     name = data.get('name')
     email = data.get('email')
 
-    # Validate input (basic)
+    # Validate required fields
     if not name or not email:
-        # Return error with HTTP 400 (bad request)
         return jsonify({"error": "Name and email required"}), 400
 
-    # Connect to DB
+    # Open database connection
     conn = get_db_connection()
-    cursor = conn.cursor()  # Cursor executes SQL commands
 
-    # Insert new user into DB
+    # Create a cursor object to execute SQL commands
+    cursor = conn.cursor()
+
+    # Insert new user into database
     cursor.execute(
-        'INSERT INTO users (name, email) VALUES (?, ?)',  # SQL query
-        (name, email)  # Values to insert (safe from SQL injection)
+        'INSERT INTO users (name, email) VALUES (?, ?)',
+        (name, email)  # Safe parameterized input
     )
 
-    # Save changes
+    # Save changes to database
     conn.commit()
 
-    # Get ID of newly inserted row
+    # Retrieve ID of the newly inserted user
     new_id = cursor.lastrowid
 
-    # Close connection
+    # Close database connection
     conn.close()
 
-    # Return created user with HTTP 201 (created)
+    # Return created user object with HTTP 201 (Created)
     return jsonify({
         "id": new_id,
         "name": name,

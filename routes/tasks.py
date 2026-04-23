@@ -1,46 +1,44 @@
-# Import Blueprint to organize routes into modular components
-# request is used to access incoming HTTP request data (JSON body)
-# jsonify converts Python data structures into JSON responses
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify  
+# Blueprint → modular route grouping
+# request → access incoming JSON data
+# jsonify → return JSON responses
 
-# Import database helper function to establish a connection to SQLite
-from utils.db import get_db_connection
+from utils.db import get_db_connection  
+# DB helper function to connect to SQLite
 
 
-# Create a Blueprint for task-related routes
+# Create Blueprint for task-related routes
 tasks_bp = Blueprint('tasks', __name__)
 
 
 # =========================================================
-# GET /tasks → Fetch all tasks (with user name via JOIN)
+# GET /tasks → Fetch ALL tasks (with user name)
 # =========================================================
 @tasks_bp.route('/tasks', methods=['GET'])
 def get_tasks():
-    print("[INFO] GET /tasks called")
+    print("[INFO] GET /tasks called")  
+    # Debug log → confirms endpoint was hit
 
-    # Establish DB connection
+    # Open DB connection
     conn = get_db_connection()
 
-    print("[INFO] Running tasks query")
-
-    # Execute SQL query with JOIN
+    # Execute SQL query joining tasks with users table
     tasks = conn.execute('''
         SELECT t.*, u.name AS user_name
         FROM tasks t
         LEFT JOIN users u ON t.user_id = u.id
     ''').fetchall()
-
-    print(f"[INFO] Retrieved {len(tasks)} tasks")
+    # LEFT JOIN ensures tasks still appear even if user missing
 
     # Close DB connection
     conn.close()
 
-    # Convert rows to dict and return JSON
+    # Convert rows to dictionaries and return JSON list
     return jsonify([dict(task) for task in tasks])
 
 
 # =========================================================
-# GET /tasks/<id> → Fetch a single task
+# GET /tasks/<id> → Fetch a SINGLE task
 # =========================================================
 @tasks_bp.route('/tasks/<int:id>', methods=['GET'])
 def get_task(id):
@@ -48,8 +46,7 @@ def get_task(id):
 
     conn = get_db_connection()
 
-    print("[INFO] Running single task query")
-
+    # Fetch one task using parameterized query
     task = conn.execute('''
         SELECT t.*, u.name AS user_name
         FROM tasks t
@@ -57,14 +54,13 @@ def get_task(id):
         WHERE t.id = ?
     ''', (id,)).fetchone()
 
-    print(f"[INFO] Retrieved task: {task}")
-
     conn.close()
 
-    # Handle missing task
+    # If task does not exist → return 404
     if task is None:
         return jsonify({'error': 'Task not found'}), 404
 
+    # Return task as JSON
     return jsonify(dict(task))
 
 
@@ -72,121 +68,99 @@ def get_task(id):
 # POST /tasks → Create a new task
 # =========================================================
 @tasks_bp.route('/tasks', methods=['POST'])
-# Define POST endpoint for creating a task
-
 def create_task():
+    # Parse JSON body
     data = request.get_json()
-    # Parse incoming JSON request body into Python dictionary
 
+    # Validate JSON presence
     if not data:
-        # If request body is empty or invalid JSON
-
         return jsonify({'error': 'Invalid JSON'}), 400
-        # Return error with HTTP 400 (Bad Request)
 
+    # Extract fields
     title = data.get('title')
-    # Extract 'title' field from JSON
-
     user_id = data.get('user_id')
-    # Extract 'user_id' field
 
+    # Default completed to 0 if not provided
     completed = data.get('completed', 0)
-    # Extract 'completed' field if provided
-    # Default to 0 if not included
 
+    # Validate required fields
     if not title or not user_id:
-        # Validate required fields
-
         return jsonify({'error': 'Title and user_id required'}), 400
-        # Return error if missing required data
 
+    # Normalize completed → ensure 0 or 1
     completed = 1 if completed else 0
-    # Normalize completed:
-    # Convert truthy values to 1, falsy to 0
 
     conn = get_db_connection()
-    # Open DB connection
-
     cursor = conn.cursor()
-    # Create cursor to execute SQL
 
+    # Insert task into DB
     cursor.execute(
         'INSERT INTO tasks (title, user_id, completed) VALUES (?, ?, ?)',
         (title, user_id, completed)
     )
-    # Insert new task into database
 
-    conn.commit()
     # Save changes
+    conn.commit()
 
+    # Get ID of new task
     new_id = cursor.lastrowid
-    # Get ID of newly inserted row
 
+    # Close connection
     conn.close()
-    # Close DB connection
 
+    # Return created task with HTTP 201
     return jsonify({
         'id': new_id,
         'title': title,
         'user_id': user_id,
         'completed': completed
     }), 201
-    # Return created task with HTTP 201 (Created)
+
 
 # =========================================================
 # PUT /tasks/<id> → Update an existing task
 # =========================================================
 @tasks_bp.route('/tasks/<int:id>', methods=['PUT'])
-# Define PUT endpoint for updating a task
-
 def update_task(id):
-    data = request.get_json()
     # Parse JSON request
+    data = request.get_json()
 
+    # Validate JSON
     if not data:
-        # Check for invalid JSON
-
         return jsonify({'error': 'Invalid JSON'}), 400
 
+    # Extract updated fields
     title = data.get('title')
-    # Extract updated title
-
     user_id = data.get('user_id')
-    # Extract updated user ID
-
     completed = data.get('completed')
-    # Extract updated completed value
 
+    # Validate required fields
     if not title or not user_id or completed is None:
-        # Validate required fields (completed must be explicitly provided)
-
         return jsonify({'error': 'Title, user_id, and completed required'}), 400
 
+    # Normalize completed value
     completed = 1 if completed else 0
-    # Normalize to 0 or 1
 
     conn = get_db_connection()
-    # Open DB connection
 
+    # Execute update query
     result = conn.execute(
         'UPDATE tasks SET title = ?, user_id = ?, completed = ? WHERE id = ?',
         (title, user_id, completed, id)
     )
-    # Execute update query
 
-    conn.commit()
     # Save changes
+    conn.commit()
 
+    # Close connection
     conn.close()
-    # Close DB connection
 
+    # If no rows affected → task doesn't exist
     if result.rowcount == 0:
-        # If no rows were updated → task doesn't exist
-
         return jsonify({'error': 'Task not found'}), 404
 
-    return jsonify({'message': 'Task updated'})
     # Return success message
+    return jsonify({'message': 'Task updated'})
 
 
 # =========================================================
@@ -198,20 +172,21 @@ def delete_task(id):
 
     conn = get_db_connection()
 
-    print("[INFO] Running delete query")
-
+    # Execute delete query
     result = conn.execute(
         'DELETE FROM tasks WHERE id = ?',
         (id,)
     )
 
+    # Save changes
     conn.commit()
+
+    # Close connection
     conn.close()
 
-    # Handle non-existent task
+    # If no rows deleted → task not found
     if result.rowcount == 0:
         return jsonify({'error': 'Task not found'}), 404
 
-    print("[INFO] Task deleted successfully")
-
+    # Return success response
     return jsonify({'message': 'Task deleted'})
