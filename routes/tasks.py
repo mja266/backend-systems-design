@@ -72,88 +72,121 @@ def get_task(id):
 # POST /tasks → Create a new task
 # =========================================================
 @tasks_bp.route('/tasks', methods=['POST'])
+# Define POST endpoint for creating a task
+
 def create_task():
-    print("[INFO] POST /tasks called")
-
-    # Safely parse JSON
     data = request.get_json()
+    # Parse incoming JSON request body into Python dictionary
 
-    # Handle invalid or missing JSON
     if not data:
+        # If request body is empty or invalid JSON
+
         return jsonify({'error': 'Invalid JSON'}), 400
+        # Return error with HTTP 400 (Bad Request)
 
-    # Extract fields
     title = data.get('title')
-    user_id = data.get('user_id')
+    # Extract 'title' field from JSON
 
-    # Validate required fields
+    user_id = data.get('user_id')
+    # Extract 'user_id' field
+
+    completed = data.get('completed', 0)
+    # Extract 'completed' field if provided
+    # Default to 0 if not included
+
     if not title or not user_id:
+        # Validate required fields
+
         return jsonify({'error': 'Title and user_id required'}), 400
+        # Return error if missing required data
+
+    completed = 1 if completed else 0
+    # Normalize completed:
+    # Convert truthy values to 1, falsy to 0
 
     conn = get_db_connection()
-    cursor = conn.cursor()
+    # Open DB connection
 
-    print("[INFO] Inserting new task")
+    cursor = conn.cursor()
+    # Create cursor to execute SQL
 
     cursor.execute(
-        'INSERT INTO tasks (title, user_id) VALUES (?, ?)',
-        (title, user_id)
+        'INSERT INTO tasks (title, user_id, completed) VALUES (?, ?, ?)',
+        (title, user_id, completed)
     )
+    # Insert new task into database
 
     conn.commit()
+    # Save changes
 
     new_id = cursor.lastrowid
+    # Get ID of newly inserted row
 
     conn.close()
-
-    print(f"[INFO] Task created with ID: {new_id}")
+    # Close DB connection
 
     return jsonify({
         'id': new_id,
         'title': title,
-        'user_id': user_id
+        'user_id': user_id,
+        'completed': completed
     }), 201
-
+    # Return created task with HTTP 201 (Created)
 
 # =========================================================
 # PUT /tasks/<id> → Update an existing task
 # =========================================================
 @tasks_bp.route('/tasks/<int:id>', methods=['PUT'])
+# Define PUT endpoint for updating a task
+
 def update_task(id):
-    print(f"[INFO] PUT /tasks/{id} called")
-
     data = request.get_json()
+    # Parse JSON request
 
-    # Handle invalid JSON
     if not data:
+        # Check for invalid JSON
+
         return jsonify({'error': 'Invalid JSON'}), 400
 
     title = data.get('title')
-    user_id = data.get('user_id')
+    # Extract updated title
 
-    # Validate required fields
-    if not title or not user_id:
-        return jsonify({'error': 'Title and user_id required'}), 400
+    user_id = data.get('user_id')
+    # Extract updated user ID
+
+    completed = data.get('completed')
+    # Extract updated completed value
+
+    if not title or not user_id or completed is None:
+        # Validate required fields (completed must be explicitly provided)
+
+        return jsonify({'error': 'Title, user_id, and completed required'}), 400
+
+    completed = 1 if completed else 0
+    # Normalize to 0 or 1
 
     conn = get_db_connection()
-
-    print("[INFO] Running update query")
+    # Open DB connection
 
     result = conn.execute(
-        'UPDATE tasks SET title = ?, user_id = ? WHERE id = ?',
-        (title, user_id, id)
+        'UPDATE tasks SET title = ?, user_id = ?, completed = ? WHERE id = ?',
+        (title, user_id, completed, id)
     )
+    # Execute update query
 
     conn.commit()
-    conn.close()
+    # Save changes
 
-    # Handle non-existent task
+    conn.close()
+    # Close DB connection
+
     if result.rowcount == 0:
+        # If no rows were updated → task doesn't exist
+
         return jsonify({'error': 'Task not found'}), 404
 
-    print("[INFO] Task updated successfully")
-
     return jsonify({'message': 'Task updated'})
+    # Return success message
 
 
 # =========================================================
