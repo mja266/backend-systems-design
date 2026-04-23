@@ -7,22 +7,28 @@ from utils.db import get_db_connection  # Import DB helper function
 users_bp = Blueprint('users', __name__)
 
 # =========================
-# GET /users
+# GET /users/<id>
 # =========================
-@users_bp.route('/users', methods=['GET'])
-def get_users():
-    # Get database connection
+@users_bp.route('/users/<int:id>', methods=['GET'])
+def get_user(id):
+    # Open database connection
     conn = get_db_connection()
 
-    # Execute SQL query to fetch all users
-    users = conn.execute('SELECT * FROM users').fetchall()
+    # Fetch one user by ID
+    user = conn.execute(
+        'SELECT * FROM users WHERE id = ?',
+        (id,)
+    ).fetchone()
 
-    # Close connection to avoid memory leaks
+    # Close connection
     conn.close()
 
-    # Convert each row into a dictionary and return JSON
-    return jsonify([dict(row) for row in users])
+    # If no user exists with that ID, return 404
+    if user is None:
+        return jsonify({'error': 'User not found'}), 404
 
+    # Return the user as JSON
+    return jsonify(dict(user))
 
 # =========================
 # POST /users
