@@ -1,200 +1,170 @@
-from flask import Blueprint, request, jsonify  
-# Blueprint → modular route grouping
-# request → access incoming JSON data
-# jsonify → return JSON responses
+from flask import Blueprint, request, jsonify
+# Blueprint → allows routes to be grouped modularly
+# request → lets us access incoming request data
+# jsonify → returns JSON responses
 
-from utils.db import get_db_connection  
-# Helper function to connect to SQLite DB
+from auth_middleware import require_auth
+# Import authentication decorator that protects routes using JWT
+
+from services.task_service import (
+    get_tasks_for_user,
+    get_task_for_user,
+    create_task_for_user,
+    update_task_for_user,
+    delete_task_for_user
+)
+# Import service functions that handle task database operations
 
 
-# Create Blueprint for task-related routes
 tasks_bp = Blueprint('tasks', __name__)
+# Create Blueprint for task-related routes
 
 
-# =========================================================
-# HELPER FUNCTION: Convert DB rows to JSON
-# =========================================================
-def format_tasks(rows):
-    # Convert each sqlite Row object into a dictionary
-    return [dict(row) for row in rows]
+def validate_task_data(data, require_completed=False):
+    # Define helper function to validate incoming task JSON
 
-
-# =========================================================
-# HELPER FUNCTION: Validate JSON input
-# =========================================================
-def validate_task_input(data, require_completed=False):
-    # Check if JSON body exists
     if not data:
-        return "Invalid JSON"
+        # If JSON body is missing or invalid
 
-    # Extract fields
+        return None, 'Invalid JSON'
+        # Return no clean data and an error message
+
     title = data.get('title')
-    user_id = data.get('user_id')
-    completed = data.get('completed')
+    # Extract title from JSON
 
-    # Validate required fields
-    if not title or not user_id:
-        return "Title and user_id required"
+    completed = data.get('completed', 0)
+    # Extract completed field
+    # Default to 0 if not provided
 
-    # For PUT requests, ensure completed is provided
+    if not title:
+        # Check if title is missing
+
+        return None, 'Title required'
+        # Return validation error
+
     if require_completed and completed is None:
-        return "Completed field required"
+        # For updates, completed must be explicitly provided
 
-    return None  # No errors
+        return None, 'Completed field required'
+        # Return validation error
 
+    completed = 1 if completed else 0
+    # Normalize completed to 1 or 0 for SQLite storage
 
-# =========================================================
-# GET /tasks → Fetch all tasks
-# =========================================================
-@tasks_bp.route('/tasks', methods=['GET'])
-def get_tasks():
-    print("[INFO] GET /tasks called")  # Debug log
-
-    conn = get_db_connection()
-
-    # Query tasks with user names using LEFT JOIN
-    rows = conn.execute('''
-        SELECT t.*, u.name AS user_name
-        FROM tasks t
-        LEFT JOIN users u ON t.user_id = u.id
-    ''').fetchall()
-
-    conn.close()
-
-    # Return formatted list of tasks
-    return jsonify(format_tasks(rows))
-
-
-# =========================================================
-# GET /tasks/<id> → Fetch single task
-# =========================================================
-@tasks_bp.route('/tasks/<int:id>', methods=['GET'])
-def get_task(id):
-    print(f"[INFO] GET /tasks/{id} called")
-
-    conn = get_db_connection()
-
-    # Fetch single task with JOIN
-    row = conn.execute('''
-        SELECT t.*, u.name AS user_name
-        FROM tasks t
-        LEFT JOIN users u ON t.user_id = u.id
-        WHERE t.id = ?
-    ''', (id,)).fetchone()
-
-    conn.close()
-
-    # If no task found → return 404
-    if row is None:
-        return jsonify({'error': 'Task not found'}), 404
-
-    # Return task as JSON
-    return jsonify(dict(row))
-
-
-# =========================================================
-# POST /tasks → Create new task
-# =========================================================
-@tasks_bp.route('/tasks', methods=['POST'])
-def create_task():
-    data = request.get_json()  # Parse JSON request body
-
-    # Validate input
-    error = validate_task_input(data)
-    if error:
-        return jsonify({'error': error}), 400
-
-    # Extract fields
-    title = data.get('title')
-    user_id = data.get('user_id')
-
-    # Default completed to 0 if not provided
-    completed = 1 if data.get('completed') else 0
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # Insert new task
-    cursor.execute(
-        'INSERT INTO tasks (title, user_id, completed) VALUES (?, ?, ?)',
-        (title, user_id, completed)
-    )
-
-    conn.commit()  # Save changes
-
-    # Get ID of newly created task
-    new_id = cursor.lastrowid
-
-    conn.close()
-
-    # Return created task
-    return jsonify({
-        'id': new_id,
+    return {
         'title': title,
-        'user_id': user_id,
         'completed': completed
-    }), 201
+    }, None
+    # Return clean task data and no error
 
 
-# =========================================================
-# PUT /tasks/<id> → Update task
-# =========================================================
-@tasks_bp.route('/tasks/<int:id>', methods=['PUT'])
-def update_task(id):
-    data = request.get_json()  # Parse JSON
+@tasks_bp.route('/tasks', methods=['GET'])
+@require_auth
+def get_tasks():
+    # Protected endpoint for getting tasks owned by logged-in user
 
-    # Validate input (require completed field)
-    error = validate_task_input(data, require_completed=True)
+    tasks = get_tasks_for_user(request.user_id)
+    # Fetch tasks where task.user_id equals authenticated user's ID
+
+    return jsonify(tasks)
+    # Return the user's task list as JSON
+
+
+@tasks_bp.route('/tasks/<int:id>', methods=['GET'])
+@require_auth
+def get_task(id):
+    # Protected endpoint for getting one task owned by logged-in user
+
+    task = get_task_for_user(id, request.user_id)
+    # Fetch one task by ID only if it belongs to authenticated user
+
+    if task is None:
+        # If task does not exist or does not belong to this user
+
+        return jsonify({'error': 'Task not found'}), 404
+        # Return 404 without revealing whether another user owns it
+
+    return jsonify(task)
+    # Return task as JSON
+
+
+@tasks_bp.route('/tasks', methods=['POST'])
+@require_auth
+def create_task():
+    # Protected endpoint for creating a task for logged-in user
+
+    data = request.get_json()
+    # Parse incoming JSON body
+
+    task_data, error = validate_task_data(data)
+    # Validate incoming task data
+
     if error:
+        # If validation failed
+
         return jsonify({'error': error}), 400
+        # Return 400 Bad Request
 
-    # Extract fields
-    title = data.get('title')
-    user_id = data.get('user_id')
-
-    # Normalize completed value
-    completed = 1 if data.get('completed') else 0
-
-    conn = get_db_connection()
-
-    # Execute update query
-    result = conn.execute(
-        'UPDATE tasks SET title = ?, user_id = ?, completed = ? WHERE id = ?',
-        (title, user_id, completed, id)
+    task = create_task_for_user(
+        task_data['title'],
+        request.user_id,
+        task_data['completed']
     )
+    # Create task using authenticated user's ID
+    # User cannot manually assign task to another user
 
-    conn.commit()  # Save changes
-    conn.close()
+    return jsonify(task), 201
+    # Return created task with 201 Created
 
-    # If no rows affected → task doesn't exist
-    if result.rowcount == 0:
+
+@tasks_bp.route('/tasks/<int:id>', methods=['PUT'])
+@require_auth
+def update_task(id):
+    # Protected endpoint for updating one task owned by logged-in user
+
+    data = request.get_json()
+    # Parse incoming JSON body
+
+    task_data, error = validate_task_data(data, require_completed=True)
+    # Validate data and require completed field for update
+
+    if error:
+        # If validation failed
+
+        return jsonify({'error': error}), 400
+        # Return 400 Bad Request
+
+    rows_updated = update_task_for_user(
+        id,
+        request.user_id,
+        task_data['title'],
+        task_data['completed']
+    )
+    # Update task only if it belongs to authenticated user
+
+    if rows_updated == 0:
+        # If no matching task was updated
+
         return jsonify({'error': 'Task not found'}), 404
+        # Return 404
 
-    # Return success message
     return jsonify({'message': 'Task updated'})
+    # Return success message
 
 
-# =========================================================
-# DELETE /tasks/<id> → Delete task
-# =========================================================
 @tasks_bp.route('/tasks/<int:id>', methods=['DELETE'])
+@require_auth
 def delete_task(id):
-    print(f"[INFO] DELETE /tasks/{id} called")
+    # Protected endpoint for deleting one task owned by logged-in user
 
-    conn = get_db_connection()
+    rows_deleted = delete_task_for_user(id, request.user_id)
+    # Delete task only if it belongs to authenticated user
 
-    # Execute delete query
-    result = conn.execute(
-        'DELETE FROM tasks WHERE id = ?',
-        (id,)
-    )
+    if rows_deleted == 0:
+        # If no matching task was deleted
 
-    conn.commit()
-    conn.close()
-
-    # If no rows deleted → task not found
-    if result.rowcount == 0:
         return jsonify({'error': 'Task not found'}), 404
+        # Return 404
 
-    # Return success response
     return jsonify({'message': 'Task deleted'})
+    # Return success message
