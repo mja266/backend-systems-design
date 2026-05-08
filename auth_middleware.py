@@ -1,76 +1,88 @@
-from flask import request, jsonify
-# request → lets us read HTTP request headers
-# jsonify → lets us return JSON error responses
+from flask import request
+# Imports request so we can read headers and attach user_id
 
 import jwt
-# jwt → used to decode and verify JWT tokens
+# Imports JWT library
 
 from functools import wraps
-# wraps → preserves the original route function's name and metadata
+# Preserves original route function metadata
 
+from config import SECRET_KEY
+# Imports shared SECRET_KEY
 
-SECRET_KEY = "your_secret_key_here"
-# Secret key used to verify JWT tokens
-# This must match the SECRET_KEY used in users.py when tokens are created
+from utils.responses import error_response
+# Imports standardized error response helper
+
+from utils.logger import log_warning
+# Imports warning logger
 
 
 def require_auth(route_function):
-    # Define a decorator that protects a route
+    # Defines decorator for protected routes
 
     @wraps(route_function)
-    # Preserve original function metadata so Flask routing works correctly
+    # Preserves original function name
 
     def wrapper(*args, **kwargs):
-        # Define the wrapper function that runs before the protected route
+        # Runs before the protected route
 
-        auth_header = request.headers.get('Authorization')
-        # Read the Authorization header from the incoming request
+        auth_header = request.headers.get("Authorization")
+        # Reads Authorization header
 
         if not auth_header:
-            # If no Authorization header was provided
+            # If no token was provided
 
-            return jsonify({'error': 'Token missing'}), 401
-            # Return 401 Unauthorized because the route requires login
+            log_warning("Missing token on protected route")
+            # Log missing token
 
-        if auth_header.startswith('Bearer '):
-            # Check if the header uses standard Bearer token format
+            return error_response("Token missing", 401)
+            # Return unauthorized response
 
-            token = auth_header.split(' ')[1]
-            # Extract only the token part after "Bearer "
+        if auth_header.startswith("Bearer "):
+            # If header uses Bearer format
+
+            token = auth_header.split(" ")[1]
+            # Extract token after Bearer
 
         else:
-            # If no "Bearer " prefix is provided
+            # If raw token was provided
 
             token = auth_header
-            # Treat the whole header value as the token
+            # Use entire header as token
 
         try:
-            # Try to decode and verify the JWT
+            # Try decoding JWT
 
             decoded = jwt.decode(
                 token,
                 SECRET_KEY,
-                algorithms=['HS256']
+                algorithms=["HS256"]
             )
-            # Decode the token using the same secret key and algorithm used when creating it
+            # Decode token using shared secret
 
-            request.user_id = decoded['user_id']
-            # Store the authenticated user's ID on the request object
+            request.user_id = decoded["user_id"]
+            # Attach authenticated user ID to request
 
         except jwt.ExpiredSignatureError:
-            # This runs if the token is valid but expired
+            # Token is valid but expired
 
-            return jsonify({'error': 'Token expired'}), 401
-            # Return 401 because the user needs to log in again
+            log_warning("Expired token used")
+            # Log expired token event
+
+            return error_response("Token expired", 401)
+            # Return unauthorized response
 
         except jwt.InvalidTokenError:
-            # This runs if the token is malformed, fake, or signed with the wrong key
+            # Token is malformed or invalid
 
-            return jsonify({'error': 'Invalid token'}), 401
-            # Return 401 because the token cannot be trusted
+            log_warning("Invalid token used")
+            # Log invalid token event
+
+            return error_response("Invalid token", 401)
+            # Return unauthorized response
 
         return route_function(*args, **kwargs)
-        # If token is valid, continue to the actual route
+        # Continue to protected route
 
     return wrapper
-    # Return the protected wrapper function
+    # Return wrapped route function

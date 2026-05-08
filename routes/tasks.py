@@ -1,10 +1,9 @@
-from flask import Blueprint, request, jsonify
-# Blueprint → allows routes to be grouped modularly
-# request → lets us access incoming request data
-# jsonify → returns JSON responses
+from flask import Blueprint, request
+# Blueprint creates modular routes
+# request reads query params and JSON body
 
 from auth_middleware import require_auth
-# Import authentication decorator that protects routes using JWT
+# Imports route protection decorator
 
 from services.task_service import (
     get_tasks_for_user,
@@ -13,158 +12,201 @@ from services.task_service import (
     update_task_for_user,
     delete_task_for_user
 )
-# Import service functions that handle task database operations
+# Imports task service functions
+
+from utils.responses import success_response, error_response
+# Imports standardized response helpers
+
+from utils.logger import log_info
+# Imports logger helper
 
 
-tasks_bp = Blueprint('tasks', __name__)
-# Create Blueprint for task-related routes
+tasks_bp = Blueprint("tasks", __name__)
+# Creates task route group
 
 
 def validate_task_data(data, require_completed=False):
-    # Define helper function to validate incoming task JSON
+    # Validates task JSON input
 
     if not data:
-        # If JSON body is missing or invalid
+        # If JSON body is missing
 
-        return None, 'Invalid JSON'
-        # Return no clean data and an error message
+        return None, "Invalid JSON"
+        # Return validation error
 
-    title = data.get('title')
-    # Extract title from JSON
+    title = data.get("title")
+    # Extract task title
 
-    completed = data.get('completed', 0)
-    # Extract completed field
-    # Default to 0 if not provided
+    completed = data.get("completed", 0)
+    # Extract completed value, defaulting to 0
 
     if not title:
-        # Check if title is missing
+        # If title missing
 
-        return None, 'Title required'
-        # Return validation error
+        return None, "Title required"
+        # Return title validation error
 
     if require_completed and completed is None:
-        # For updates, completed must be explicitly provided
+        # If update requires completed but it was not provided
 
-        return None, 'Completed field required'
-        # Return validation error
+        return None, "Completed field required"
+        # Return completed validation error
 
     completed = 1 if completed else 0
-    # Normalize completed to 1 or 0 for SQLite storage
+    # Normalize completed to 1 or 0
 
     return {
-        'title': title,
-        'completed': completed
+        "title": title,
+        "completed": completed
     }, None
     # Return clean task data and no error
 
 
-@tasks_bp.route('/tasks', methods=['GET'])
+@tasks_bp.route("/tasks", methods=["GET"])
 @require_auth
 def get_tasks():
-    # Protected endpoint for getting tasks owned by logged-in user
+    # Gets authenticated user's tasks
 
-    tasks = get_tasks_for_user(request.user_id)
-    # Fetch tasks where task.user_id equals authenticated user's ID
+    page = request.args.get("page", 1, type=int)
+    # Reads page query parameter, defaults to 1
 
-    return jsonify(tasks)
-    # Return the user's task list as JSON
+    limit = request.args.get("limit", 10, type=int)
+    # Reads limit query parameter, defaults to 10
+
+    completed_param = request.args.get("completed")
+    # Reads completed query parameter as string
+
+    search = request.args.get("search")
+    # Reads search query parameter
+
+    completed = None
+    # Default: no completed filter
+
+    if completed_param is not None:
+        # If completed was provided
+
+        completed = 1 if completed_param in ["1", "true", "True"] else 0
+        # Convert query param into 1 or 0
+
+    tasks = get_tasks_for_user(
+        request.user_id,
+        page=page,
+        limit=limit,
+        completed=completed,
+        search=search
+    )
+    # Get paginated and filtered tasks for authenticated user
+
+    log_info(f"user_id={request.user_id} fetched tasks")
+    # Log task fetch
+
+    return success_response(data=tasks)
+    # Return standardized success response
 
 
-@tasks_bp.route('/tasks/<int:id>', methods=['GET'])
+@tasks_bp.route("/tasks/<int:id>", methods=["GET"])
 @require_auth
 def get_task(id):
-    # Protected endpoint for getting one task owned by logged-in user
+    # Gets one authenticated user's task
 
     task = get_task_for_user(id, request.user_id)
-    # Fetch one task by ID only if it belongs to authenticated user
+    # Fetch task if owned by authenticated user
 
     if task is None:
-        # If task does not exist or does not belong to this user
+        # If task not found
 
-        return jsonify({'error': 'Task not found'}), 404
-        # Return 404 without revealing whether another user owns it
+        return error_response("Task not found", 404)
+        # Return standardized 404
 
-    return jsonify(task)
-    # Return task as JSON
+    return success_response(data=task)
+    # Return task data
 
 
-@tasks_bp.route('/tasks', methods=['POST'])
+@tasks_bp.route("/tasks", methods=["POST"])
 @require_auth
 def create_task():
-    # Protected endpoint for creating a task for logged-in user
+    # Creates a new task for authenticated user
 
     data = request.get_json()
-    # Parse incoming JSON body
+    # Parse JSON body
 
     task_data, error = validate_task_data(data)
-    # Validate incoming task data
+    # Validate task data
 
     if error:
         # If validation failed
 
-        return jsonify({'error': error}), 400
-        # Return 400 Bad Request
+        return error_response(error, 400)
+        # Return standardized 400
 
     task = create_task_for_user(
-        task_data['title'],
+        task_data["title"],
         request.user_id,
-        task_data['completed']
+        task_data["completed"]
     )
     # Create task using authenticated user's ID
-    # User cannot manually assign task to another user
 
-    return jsonify(task), 201
-    # Return created task with 201 Created
+    log_info(f"user_id={request.user_id} created task id={task['id']}")
+    # Log created task
+
+    return success_response(data=task, status=201)
+    # Return created task
 
 
-@tasks_bp.route('/tasks/<int:id>', methods=['PUT'])
+@tasks_bp.route("/tasks/<int:id>", methods=["PUT"])
 @require_auth
 def update_task(id):
-    # Protected endpoint for updating one task owned by logged-in user
+    # Updates authenticated user's task
 
     data = request.get_json()
-    # Parse incoming JSON body
+    # Parse JSON body
 
     task_data, error = validate_task_data(data, require_completed=True)
-    # Validate data and require completed field for update
+    # Validate task update data
 
     if error:
         # If validation failed
 
-        return jsonify({'error': error}), 400
-        # Return 400 Bad Request
+        return error_response(error, 400)
+        # Return standardized 400
 
     rows_updated = update_task_for_user(
         id,
         request.user_id,
-        task_data['title'],
-        task_data['completed']
+        task_data["title"],
+        task_data["completed"]
     )
-    # Update task only if it belongs to authenticated user
+    # Update task if owned by authenticated user
 
     if rows_updated == 0:
-        # If no matching task was updated
+        # If no task was updated
 
-        return jsonify({'error': 'Task not found'}), 404
-        # Return 404
+        return error_response("Task not found", 404)
+        # Return standardized 404
 
-    return jsonify({'message': 'Task updated'})
+    log_info(f"user_id={request.user_id} updated task id={id}")
+    # Log update
+
+    return success_response(message="Task updated")
     # Return success message
 
 
-@tasks_bp.route('/tasks/<int:id>', methods=['DELETE'])
+@tasks_bp.route("/tasks/<int:id>", methods=["DELETE"])
 @require_auth
 def delete_task(id):
-    # Protected endpoint for deleting one task owned by logged-in user
+    # Deletes authenticated user's task
 
     rows_deleted = delete_task_for_user(id, request.user_id)
-    # Delete task only if it belongs to authenticated user
+    # Delete task if owned by authenticated user
 
     if rows_deleted == 0:
-        # If no matching task was deleted
+        # If no task was deleted
 
-        return jsonify({'error': 'Task not found'}), 404
-        # Return 404
+        return error_response("Task not found", 404)
+        # Return standardized 404
 
-    return jsonify({'message': 'Task deleted'})
+    log_info(f"user_id={request.user_id} deleted task id={id}")
+    # Log delete
+
+    return success_response(message="Task deleted")
     # Return success message

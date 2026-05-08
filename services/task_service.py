@@ -1,39 +1,70 @@
 from utils.db import get_db_connection
-# Import helper function that creates a SQLite database connection
+# Imports database helper function
 
 
 def format_rows(rows):
-    # Define a helper function to convert SQLite rows into dictionaries
+    # Converts multiple SQLite rows into dictionaries
 
     return [dict(row) for row in rows]
-    # Convert each database row into a Python dictionary and return a list
+    # Return list of dictionaries
 
 
-def get_tasks_for_user(user_id):
-    # Define a function that returns all tasks owned by a specific user
+def get_tasks_for_user(user_id, page=1, limit=10, completed=None, search=None):
+    # Gets paginated, filtered tasks for one authenticated user
 
-    conn = get_db_connection()
-    # Open a database connection
+    offset = (page - 1) * limit
+    # Calculates how many records to skip
 
-    rows = conn.execute('''
+    query = '''
         SELECT t.*, u.name AS user_name
         FROM tasks t
         LEFT JOIN users u ON t.user_id = u.id
         WHERE t.user_id = ?
-    ''', (user_id,)).fetchall()
-    # Fetch all tasks where the task belongs to the authenticated user
-    # LEFT JOIN adds the user's name to each task
-    # The ? placeholder prevents SQL injection
+    '''
+    # Base SQL query: only tasks owned by authenticated user
+
+    params = [user_id]
+    # Start SQL parameters with authenticated user_id
+
+    if completed is not None:
+        # If completed filter was provided
+
+        query += ' AND t.completed = ?'
+        # Add completed filter to SQL
+
+        params.append(completed)
+        # Add completed value to parameters
+
+    if search:
+        # If search term was provided
+
+        query += ' AND t.title LIKE ?'
+        # Add title search filter
+
+        params.append(f'%{search}%')
+        # Add wildcard search value
+
+    query += ' LIMIT ? OFFSET ?'
+    # Add pagination to SQL query
+
+    params.extend([limit, offset])
+    # Add limit and offset parameters
+
+    conn = get_db_connection()
+    # Open database connection
+
+    rows = conn.execute(query, params).fetchall()
+    # Execute query and fetch all matching rows
 
     conn.close()
-    # Close the database connection
+    # Close database connection
 
     return format_rows(rows)
-    # Convert rows into dictionaries and return them
+    # Return rows as list of dictionaries
 
 
 def get_task_for_user(task_id, user_id):
-    # Define a function that fetches one task by ID for a specific user
+    # Gets one task only if it belongs to authenticated user
 
     conn = get_db_connection()
     # Open database connection
@@ -44,58 +75,56 @@ def get_task_for_user(task_id, user_id):
         LEFT JOIN users u ON t.user_id = u.id
         WHERE t.id = ? AND t.user_id = ?
     ''', (task_id, user_id)).fetchone()
-    # Fetch one task only if:
-    # - the task ID matches
-    # - the task belongs to the authenticated user
+    # Fetch one matching task by task ID and user ID
 
     conn.close()
     # Close database connection
 
     if row is None:
-        # If no matching task was found
+        # If no task was found
 
         return None
-        # Return None so the route can return a 404
+        # Return None so route can return 404
 
     return dict(row)
-    # Convert the row into a dictionary and return it
+    # Return task as dictionary
 
 
 def create_task_for_user(title, user_id, completed):
-    # Define a function to create a new task for a user
+    # Creates a task for authenticated user
 
     conn = get_db_connection()
     # Open database connection
 
     cursor = conn.cursor()
-    # Create cursor to execute SQL commands
+    # Create SQL cursor
 
     cursor.execute(
         'INSERT INTO tasks (title, user_id, completed) VALUES (?, ?, ?)',
         (title, user_id, completed)
     )
-    # Insert a new task into the tasks table
+    # Insert task into database
 
     conn.commit()
-    # Save the change to the database
+    # Save database changes
 
     new_id = cursor.lastrowid
-    # Get the ID of the newly created task
+    # Get new task ID
 
     conn.close()
     # Close database connection
 
     return {
-        'id': new_id,
-        'title': title,
-        'user_id': user_id,
-        'completed': completed
+        "id": new_id,
+        "title": title,
+        "user_id": user_id,
+        "completed": completed
     }
-    # Return the newly created task as a dictionary
+    # Return created task data
 
 
 def update_task_for_user(task_id, user_id, title, completed):
-    # Define a function to update a task owned by a specific user
+    # Updates a task only if it belongs to authenticated user
 
     conn = get_db_connection()
     # Open database connection
@@ -104,23 +133,20 @@ def update_task_for_user(task_id, user_id, title, completed):
         'UPDATE tasks SET title = ?, completed = ? WHERE id = ? AND user_id = ?',
         (title, completed, task_id, user_id)
     )
-    # Update the task only if:
-    # - the task ID matches
-    # - the task belongs to the authenticated user
+    # Update matching task
 
     conn.commit()
-    # Save the update
+    # Save update
 
     conn.close()
-    # Close database connection
+    # Close connection
 
     return result.rowcount
-    # Return number of rows updated
-    # 0 means task was not found or does not belong to the user
+    # Return number of updated rows
 
 
 def delete_task_for_user(task_id, user_id):
-    # Define a function to delete a task owned by a specific user
+    # Deletes a task only if it belongs to authenticated user
 
     conn = get_db_connection()
     # Open database connection
@@ -129,16 +155,13 @@ def delete_task_for_user(task_id, user_id):
         'DELETE FROM tasks WHERE id = ? AND user_id = ?',
         (task_id, user_id)
     )
-    # Delete the task only if:
-    # - the task ID matches
-    # - the task belongs to the authenticated user
+    # Delete matching task
 
     conn.commit()
-    # Save the delete operation
+    # Save delete
 
     conn.close()
-    # Close database connection
+    # Close connection
 
     return result.rowcount
-    # Return number of rows deleted
-    # 0 means task was not found or does not belong to the user
+    # Return number of deleted rows

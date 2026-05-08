@@ -1,200 +1,219 @@
-from flask import Blueprint, request, jsonify
-# Blueprint → modular route grouping
-# request → access incoming request data
-# jsonify → return JSON responses
+from flask import Blueprint, request
+# Blueprint groups routes
+# request reads JSON body
 
 from utils.db import get_db_connection
-# Import database connection helper
+# Imports DB helper
+
+from utils.responses import success_response, error_response
+# Imports standardized response helpers
+
+from utils.logger import log_info, log_warning
+# Imports logging helpers
+
+from config import SECRET_KEY, TOKEN_EXPIRATION_HOURS
+# Imports shared app config
 
 import bcrypt
-# bcrypt → securely hashes and verifies passwords
+# Imports password hashing library
 
 import jwt
-# jwt → creates JSON Web Tokens for authentication
+# Imports JWT library
 
 import datetime
-# datetime → creates token expiration times
+# Imports datetime for token expiration
 
 
-SECRET_KEY = "your_secret_key_here"
-# Secret key used to sign JWT tokens
-# Must match SECRET_KEY in auth_middleware.py
+users_bp = Blueprint("users", __name__)
+# Creates users route group
 
 
-users_bp = Blueprint('users', __name__)
-# Create Blueprint for user-related routes
-
-
-@users_bp.route('/users', methods=['GET'])
+@users_bp.route("/users", methods=["GET"])
 def get_users():
-    # Endpoint to return all users
+    # Gets all users
 
     conn = get_db_connection()
     # Open database connection
 
     users = conn.execute(
-        'SELECT id, name, email FROM users'
+        "SELECT id, name, email FROM users"
     ).fetchall()
-    # Fetch users without password column for security
+    # Fetch users without exposing password
 
     conn.close()
-    # Close database connection
+    # Close DB connection
 
-    return jsonify([dict(user) for user in users])
-    # Convert rows into dictionaries and return JSON list
+    return success_response(data=[dict(user) for user in users])
+    # Return users in standardized response
 
 
-@users_bp.route('/users/<int:id>', methods=['GET'])
+@users_bp.route("/users/<int:id>", methods=["GET"])
 def get_user(id):
-    # Endpoint to return one user by ID
+    # Gets one user by ID
 
     conn = get_db_connection()
     # Open database connection
 
     user = conn.execute(
-        'SELECT id, name, email FROM users WHERE id = ?',
+        "SELECT id, name, email FROM users WHERE id = ?",
         (id,)
     ).fetchone()
-    # Fetch one user by ID
-    # Parameterized query prevents SQL injection
+    # Fetch user by ID
 
     conn.close()
-    # Close database connection
+    # Close DB connection
 
     if user is None:
-        # If no user exists with that ID
+        # If user not found
 
-        return jsonify({'error': 'User not found'}), 404
-        # Return 404 Not Found
+        return error_response("User not found", 404)
+        # Return 404
 
-    return jsonify(dict(user))
-    # Return user as JSON
+    return success_response(data=dict(user))
+    # Return user data
 
 
-@users_bp.route('/users', methods=['POST'])
+@users_bp.route("/users", methods=["POST"])
 def create_user():
-    # Endpoint to create/register a new user
+    # Registers a new user
 
     data = request.get_json()
-    # Parse JSON body from request
+    # Parse JSON body
 
     if not data:
-        # If JSON body is missing or invalid
+        # If JSON body missing
 
-        return jsonify({'error': 'Invalid JSON'}), 400
-        # Return 400 Bad Request
+        return error_response("Invalid JSON", 400)
+        # Return bad request
 
-    name = data.get('name')
-    # Extract name from JSON
+    name = data.get("name")
+    # Extract name
 
-    email = data.get('email')
-    # Extract email from JSON
+    email = data.get("email")
+    # Extract email
 
-    password = data.get('password')
-    # Extract password from JSON
+    password = data.get("password")
+    # Extract password
 
     if not name or not email or not password:
-        # Validate all required fields
+        # Validate required fields
 
-        return jsonify({'error': 'Name, email, and password required'}), 400
-        # Return 400 if anything is missing
+        return error_response("Name, email, and password required", 400)
+        # Return validation error
 
     hashed_password = bcrypt.hashpw(
-        password.encode('utf-8'),
+        password.encode("utf-8"),
         bcrypt.gensalt()
     )
-    # Convert password to bytes and hash it using bcrypt
+    # Hash password with bcrypt
 
     conn = get_db_connection()
-    # Open database connection
+    # Open DB connection
 
     cursor = conn.cursor()
-    # Create cursor to run SQL commands
+    # Create cursor
 
     cursor.execute(
-        'INSERT INTO users (name, email, password) VALUES (?, ?, ?)',
+        "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
         (name, email, hashed_password)
     )
-    # Insert new user with hashed password
-    # Never store plaintext passwords
+    # Insert user with hashed password
 
     conn.commit()
-    # Save database changes
+    # Save changes
 
     new_id = cursor.lastrowid
-    # Get ID of newly created user
+    # Get new user ID
 
     conn.close()
-    # Close database connection
+    # Close DB connection
 
-    return jsonify({
-        'id': new_id,
-        'name': name,
-        'email': email
-    }), 201
-    # Return created user without exposing password
+    log_info(f"Created user id={new_id}")
+    # Log new user creation without password
+
+    return success_response(
+        data={
+            "id": new_id,
+            "name": name,
+            "email": email
+        },
+        status=201
+    )
+    # Return created user
 
 
-@users_bp.route('/login', methods=['POST'])
+@users_bp.route("/login", methods=["POST"])
 def login():
-    # Endpoint to authenticate user and return JWT
+    # Authenticates user and returns JWT
 
     data = request.get_json()
-    # Parse JSON request body
+    # Parse JSON body
 
     if not data:
-        # If JSON is missing or invalid
+        # If JSON missing
 
-        return jsonify({'error': 'Invalid JSON'}), 400
-        # Return 400 Bad Request
+        return error_response("Invalid JSON", 400)
+        # Return bad request
 
-    email = data.get('email')
-    # Extract email from JSON
+    email = data.get("email")
+    # Extract email
 
-    password = data.get('password')
-    # Extract password from JSON
+    password = data.get("password")
+    # Extract password
 
     if not email or not password:
         # Validate login fields
 
-        return jsonify({'error': 'Email and password required'}), 400
-        # Return 400 if missing email or password
+        return error_response("Email and password required", 400)
+        # Return validation error
 
     conn = get_db_connection()
-    # Open database connection
+    # Open DB connection
 
     user = conn.execute(
-        'SELECT * FROM users WHERE email = ?',
+        "SELECT * FROM users WHERE email = ?",
         (email,)
     ).fetchone()
     # Find user by email
 
     conn.close()
-    # Close database connection
+    # Close DB connection
 
-    if user is None or user['password'] is None:
-        # If user does not exist or has no password hash
+    if user is None or user["password"] is None:
+        # If user missing or old user has no password hash
 
-        return jsonify({'error': 'Invalid credentials'}), 401
-        # Return generic 401 without revealing which part failed
+        log_warning(f"Failed login attempt for email={email}")
+        # Log failed login attempt
+
+        return error_response("Invalid credentials", 401)
+        # Return generic auth error
 
     if not bcrypt.checkpw(
-        password.encode('utf-8'),
-        user['password']
+        password.encode("utf-8"),
+        user["password"]
     ):
-        # Compare provided password against stored bcrypt hash
+        # Compare submitted password to stored hash
 
-        return jsonify({'error': 'Invalid credentials'}), 401
-        # Return 401 if password is wrong
+        log_warning(f"Failed login attempt for email={email}")
+        # Log failed login
 
-    token = jwt.encode({
-        'user_id': user['id'],
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1)
-    }, SECRET_KEY, algorithm='HS256')
-    # Create JWT containing:
-    # - user_id
-    # - expiration time
-    # Signed using SECRET_KEY
+        return error_response("Invalid credentials", 401)
+        # Return generic auth error
 
-    return jsonify({'token': token})
-    # Return token to client
+    token = jwt.encode(
+        {
+            "user_id": user["id"],
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(
+                hours=TOKEN_EXPIRATION_HOURS
+            )
+        },
+        SECRET_KEY,
+        algorithm="HS256"
+    )
+    # Create JWT with user ID and expiration
+
+    log_info(f"Successful login for user_id={user['id']}")
+    # Log successful login
+
+    return success_response(data={"token": token})
+    # Return JWT in standardized response
